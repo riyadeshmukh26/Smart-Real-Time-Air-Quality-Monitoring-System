@@ -1,0 +1,27 @@
+
+# Python virtual environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Generated Spark output
+output/
+
+# Large datasets
+city_hour.csv
+city_hour_cleaned.csv
+
+# Jupyter temporary files
+.ipynb_checkpoints/
+
+# IDE settings
+.vscode/
