@@ -1,16 +1,29 @@
-
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, from_json, avg, count, round as spark_round
+    col,
+    from_json,
+    avg,
+    count,
+    round as spark_round
 )
 from pyspark.sql.types import (
-    StructType, StructField, StringType, DoubleType
+    StructType,
+    StructField,
+    StringType,
+    DoubleType
 )
 
-# Create Spark Session
+import os
+import csv
+from datetime import datetime, timezone
+
+# --------------------------------------------------
+# 1. CREATE SPARK SESSION
+# --------------------------------------------------
+
 spark = (
     SparkSession.builder
-    .appName("AirQualityStreaming")
+    .appName("AirBloom-AirQualityStreaming")
     .master("local[2]")
     .config("spark.sql.shuffle.partitions", "2")
     .getOrCreate()
@@ -18,69 +31,138 @@ spark = (
 
 spark.sparkContext.setLogLevel("WARN")
 
-# Define incoming Kafka JSON schema
+# --------------------------------------------------
+# 2. DEFINE KAFKA JSON SCHEMA
+# --------------------------------------------------
+
 schema = StructType([
     StructField("City", StringType(), True),
     StructField("Datetime", StringType(), True),
+
     StructField("PM2.5", DoubleType(), True),
     StructField("PM10", DoubleType(), True),
+
+    # Additional harmful pollutants
+    StructField("NO2", DoubleType(), True),
+    StructField("SO2", DoubleType(), True),
+    StructField("CO", DoubleType(), True),
+    StructField("O3", DoubleType(), True),
+
     StructField("AQI", DoubleType(), True),
     StructField("AQI_Bucket", StringType(), True),
     StructField("streamed_at", StringType(), True)
 ])
 
-# Read streaming messages from Kafka
+# --------------------------------------------------
+# 3. READ KAFKA STREAM
+# --------------------------------------------------
+
 kafka_stream = (
     spark.readStream
     .format("kafka")
-    .option("kafka.bootstrap.servers", "kafka:29092")
+    .option(
+        "kafka.bootstrap.servers",
+        "kafka:29092"
+    )
     .option("subscribe", "air_quality_data")
     .option("startingOffsets", "latest")
     .load()
 )
 
-# Convert Kafka JSON messages to columns
+# --------------------------------------------------
+# 4. CONVERT JSON TO SPARK COLUMNS
+# --------------------------------------------------
+
 air_quality = (
     kafka_stream
-    .selectExpr("CAST(value AS STRING) AS json_value")
-    .select(from_json(col("json_value"), schema).alias("data"))
+    .selectExpr(
+        "CAST(value AS STRING) AS json_value"
+    )
+    .select(
+        from_json(
+            col("json_value"),
+            schema
+        ).alias("data")
+    )
     .select("data.*")
-    
-.filter(
-    col("City").isNotNull()
-    & col("`PM2.5`").isNotNull()
-    & col("PM10").isNotNull()
-    & col("AQI").isNotNull()
+    .filter(
+        col("City").isNotNull()
+        & col("`PM2.5`").isNotNull()
+        & col("PM10").isNotNull()
+        & col("AQI").isNotNull()
+    )
 )
 
-)
+# --------------------------------------------------
+# 5. CALCULATE CITY-WISE AVERAGES
+# --------------------------------------------------
 
-# Calculate average pollution values per city
 analytics = (
     air_quality
     .groupBy("City")
     .agg(
         count("*").alias("Total_Records"),
-        spark_round(avg(col("`PM2.5`")), 2).alias("Avg_PM25"),
-        spark_round(avg("PM10"), 2).alias("Avg_PM10"),
-        spark_round(avg("AQI"), 2).alias("Avg_AQI")
+
+        spark_round(
+            avg(col("`PM2.5`")), 2
+        ).alias("Avg_PM25"),
+
+        spark_round(
+            avg(col("PM10")), 2
+        ).alias("Avg_PM10"),
+
+        spark_round(
+            avg(col("NO2")), 2
+        ).alias("Avg_NO2"),
+
+        spark_round(
+            avg(col("SO2")), 2
+        ).alias("Avg_SO2"),
+
+        spark_round(
+            avg(col("CO")), 2
+        ).alias("Avg_CO"),
+
+        spark_round(
+            avg(col("O3")), 2
+        ).alias("Avg_O3"),
+
+        spark_round(
+            avg(col("AQI")), 2
+        ).alias("Avg_AQI")
     )
 )
 
-# Display updated analytics in terminal
+# --------------------------------------------------
+# 6. OUTPUT FILE PATHS
+# --------------------------------------------------
 
-import os
+OUTPUT_FILE = (
+    "/opt/spark-output/air_quality_analytics.csv"
+)
 
-OUTPUT_FILE = "/opt/spark-output/air_quality_analytics.csv"
+HISTORY_FILE = (
+    "/opt/spark-output/history/aqi_history.csv"
+)
 
+os.makedirs(
+    os.path.dirname(OUTPUT_FILE),
+    exist_ok=True
+)
 
-import csv
-import os
+os.makedirs(
+    os.path.dirname(HISTORY_FILE),
+    exist_ok=True
+)
 
-OUTPUT_FILE = "/opt/spark-output/air_quality_analytics.csv"
-from datetime import datetime, timezone
+# --------------------------------------------------
+# 7. SAVE ANALYTICS TO CSV
+# --------------------------------------------------
+
 def save_analytics(batch_df, batch_id):
+
     rows = batch_df.orderBy("City").collect()
+
     temp_file = OUTPUT_FILE + ".tmp"
 
     columns = [
@@ -88,53 +170,100 @@ def save_analytics(batch_df, batch_id):
         "Total_Records",
         "Avg_PM25",
         "Avg_PM10",
+        "Avg_NO2",
+        "Avg_SO2",
+        "Avg_CO",
+        "Avg_O3",
         "Avg_AQI"
     ]
 
-    with open(temp_file, "w", newline="") as file:
+    # Save latest city-wise analytics
+    with open(
+        temp_file,
+        "w",
+        newline="",
+        encoding="utf-8"
+    ) as file:
+
         writer = csv.writer(file)
+
         writer.writerow(columns)
 
         for row in rows:
-            writer.writerow([row[column] for column in columns])
+            writer.writerow([
+                row[column]
+                for column in columns
+            ])
 
-    os.replace(temp_file, OUTPUT_FILE)
+    # Replace previous output atomically
+    os.replace(
+        temp_file,
+        OUTPUT_FILE
+    )
 
-    # Save timestamped AQI history for live trend graph
-    history_file = "/opt/spark-output/history/aqi_history.csv"
+    # ----------------------------------------------
+    # SAVE LIVE AQI HISTORY
+    # ----------------------------------------------
 
-    file_exists = os.path.exists(history_file)
+    file_exists = os.path.exists(
+        HISTORY_FILE
+    )
 
-    with open(history_file, "a", newline="") as file:
+    with open(
+        HISTORY_FILE,
+        "a",
+        newline="",
+        encoding="utf-8"
+    ) as file:
+
         writer = csv.writer(file)
 
-        if not file_exists or os.path.getsize(history_file) == 0:
-            writer.writerow(["Timestamp", "City", "Avg_AQI"])
+        if (
+            not file_exists
+            or os.path.getsize(HISTORY_FILE) == 0
+        ):
+            writer.writerow([
+                "Timestamp",
+                "City",
+                "Avg_AQI"
+            ])
 
-        timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = (
+            datetime.now(timezone.utc).isoformat()
+        )
 
         for row in rows:
+
             writer.writerow([
                 timestamp,
                 row["City"],
                 row["Avg_AQI"]
             ])
 
+    print(
+        f"Batch {batch_id}: "
+        f"Saved analytics for {len(rows)} cities"
+    )
 
-    print(f"Batch {batch_id}: Saved {len(rows)} cities")
-
-
+# --------------------------------------------------
+# 8. START SPARK STRUCTURED STREAMING
+# --------------------------------------------------
 
 query = (
     analytics.writeStream
     .outputMode("complete")
     .foreachBatch(save_analytics)
-    .trigger(processingTime="10 seconds")
+    .trigger(
+        processingTime="10 seconds"
+    )
     .start()
 )
 
-
-print("Spark Structured Streaming started!")
+print("------------------------------------")
+print("AirBloom Spark Streaming Started!")
+print("Monitoring:")
+print("PM2.5, PM10, NO2, SO2, CO, O3, AQI")
+print("------------------------------------")
 print("Waiting for Kafka air quality records...")
 
 query.awaitTermination()

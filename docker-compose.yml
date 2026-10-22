@@ -10,7 +10,7 @@ services:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      
+
       KAFKA_LISTENERS: EXTERNAL://:9092,INTERNAL://:29092,CONTROLLER://:9093
       KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9092,INTERNAL://kafka:29092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
@@ -27,14 +27,16 @@ services:
     container_name: spark
     user: root
     command: ["sleep", "infinity"]
-    
+
     volumes:
       - ./spark:/opt/spark-apps
       - ./output:/opt/spark-output
+      - ./city_hour_cleaned.csv:/opt/spark-data/city_hour_cleaned.csv:ro
 
     depends_on:
       - kafka
+
     environment:
       SPARK_LOCAL_IP: 127.0.0.1
-    mem_limit: 4g
 
+    mem_limit: 4g

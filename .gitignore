@@ -25,3 +25,10 @@ city_hour_cleaned.csv
 
 # IDE settings
 .vscode/
+
+# Spark temporary files
+spark-warehouse/
+metastore_db/
+checkpoint/
+checkpoints/
+*.log
