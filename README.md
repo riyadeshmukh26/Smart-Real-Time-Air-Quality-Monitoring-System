@@ -162,6 +162,22 @@ The dashboard also displays the **Air Quality Index (AQI)** to summarize overall
 - Year-to-year AQI comparison.
 - Historical processed data tables.
 
+
+## 📸 Dashboard Screenshots
+
+### 🌿 Live Air Quality Dashboard
+![Live Dashboard](screenshots/live_dashboard.png)
+
+### 📊 Pollutant Analysis
+![Pollutant Analysis](screenshots/pollutant_analysis.png)
+
+### ⏳ Air Quality Time Machine
+![Time Machine](screenshots/time_machine.png)
+
+### 📈 Historical Pollution Trends
+![Historical Trends](screenshots/historical_trends.png)
+
+
 ## 📂 Project Structure
 
 ```text
